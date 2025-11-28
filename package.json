@@ -2,7 +2,7 @@
   "name": "voicenote-comment",
   "displayName": "Voice Note Comment",
   "description": "Add sharable voice notes directly to your code as comments.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "images/icon.png",
   "publisher": "AnozieChibuike",
   "repository": {
@@ -41,6 +41,21 @@
         "command": "voicenote.refreshList",
         "title": "Refresh Voice Notes",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "voicenote.switchStorage",
+        "title": "Switch Storage Method",
+        "icon": "$(database)"
+      },
+      {
+        "command": "voicenote.configureCloudinary",
+        "title": "Configure Cloudinary",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "voicenote.setAuthor",
+        "title": "Set Voice Note Author",
+        "icon": "$(person)"
       }
     ],
     "keybindings": [
@@ -73,6 +88,16 @@
           "group": "navigation"
         },
         {
+          "command": "voicenote.switchStorage",
+          "when": "view == voicenoteList",
+          "group": "navigation"
+        },
+        {
+          "command": "voicenote.configureCloudinary",
+          "when": "view == voicenoteList",
+          "group": "navigation"
+        },
+        {
           "command": "voicenote.deleteAllNotes",
           "when": "view == voicenoteList",
           "group": "navigation"
@@ -95,6 +120,50 @@
           "name": "All Voice Notes"
         }
       ]
+    },
+    "configuration": {
+      "title": "Voice Note Comment",
+      "properties": {
+        "voicenote.cloudinary.cloudName": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudinary Cloud Name"
+        },
+        "voicenote.cloudinary.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudinary API Key"
+        },
+        "voicenote.cloudinary.apiSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudinary API Secret"
+        },
+        "voicenote.cloudinary.uploadPreset": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudinary Upload Preset (Optional)"
+        },
+        "voicenote.storageMethod": {
+          "type": "string",
+          "enum": [
+            "local",
+            "cloudinary"
+          ],
+          "default": "local",
+          "description": "Where to store the audio files."
+        },
+        "voicenote.cacheOnlineAudio": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, downloaded audio files will be cached locally to avoid re-downloading."
+        },
+        "voicenote.author": {
+          "type": "string",
+          "default": "",
+          "description": "The name of the author for voice notes."
+        }
+      }
     }
   },
   "devDependencies": {
@@ -104,5 +173,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "echo 'No compilation needed for pure JS'",
     "watch": "echo 'No watch script needed for pure JS'"
+  },
+  "dependencies": {
+    "cloudinary": "^2.8.0"
   }
 }

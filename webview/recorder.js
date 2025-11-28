@@ -70,10 +70,15 @@ if (stopButton) {
       seconds
     ).padStart(2, "0")}`;
 
+    // Get optional comment
+    const commentInput = document.getElementById("commentInput");
+    const textComment = commentInput ? commentInput.value : "";
+
     // Notify extension to stop and save
     vscode.postMessage({
       command: "stopRecording",
       duration: durationText,
+      textComment: textComment,
     });
   };
 }

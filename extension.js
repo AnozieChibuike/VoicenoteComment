@@ -2,77 +2,106 @@
 
 const vscode = require("vscode");
 const path = require("path");
+const os = require("os");
+const fs = require("fs");
 const crypto = require("crypto");
 const AudioRecorder = require("./lib/AudioRecorder");
 const AudioPlayer = require("./lib/AudioPlayer");
 const VoiceNoteProvider = require("./lib/VoiceNoteProvider");
+const CloudinaryService = require("./lib/CloudinaryService");
+const VoiceNoteManager = require("./lib/VoiceNoteManager");
 
 let globalRecorder = null;
 let globalPlayer = null;
 let playbackStatusBarItem = null;
 
-/**
- * Creates the special comment marker to insert into the code.
- * @param {string} audioFileName
- * @param {string} audioDuration
- * @param {vscode.TextEditor} editor
- * @returns {string} The formatted comment block.
- */
-function createCommentMarker(audioFileName, audioDuration, editor) {
+function createCommentMarker(
+  audioFileName,
+  audioDuration,
+  editor,
+  author,
+  textComment
+) {
+  const languageId = editor.document.languageId;
+  const config = vscode.workspace.getConfiguration(
+    "voicenote",
+    editor.document.uri
+  );
+
   let commentPrefix = "//";
   let commentSuffix = "";
 
-  if (editor) {
-    const languageId = editor.document.languageId;
-    console.log(`[VoiceNote] Detected languageId: ${languageId}`);
+  // Check for block comment preference
+  const useBlockComments = config.get("useBlockComments", false);
 
+  if (useBlockComments) {
     switch (languageId) {
-      // Hash-style comments (#)
-      case "python":
-      case "yaml":
-      case "shellscript":
-      case "makefile":
-      case "dockerfile":
-      case "perl":
-      case "ruby":
-      case "powershell":
-      case "r":
-      case "elixir":
-      case "julia":
-      case "tcl":
-      case "coffeescript":
-      case "graphql":
-        commentPrefix = "#";
+      case "javascript":
+      case "typescript":
+      case "javascriptreact":
+      case "typescriptreact":
+      case "c":
+      case "cpp":
+      case "csharp":
+      case "java":
+      case "css":
+      case "less":
+      case "scss":
+      case "go":
+      case "rust":
+      case "php":
+      case "swift":
+      case "kotlin":
+      case "scala":
+      case "dart":
+        commentPrefix = "/*";
+        commentSuffix = "*/";
         break;
-
-      // XML-style comments (<!-- -->)
       case "html":
       case "xml":
       case "markdown":
-      case "vue":
-      case "svg":
-        commentPrefix = "<!-- ";
-        commentSuffix = " -->";
+        commentPrefix = "<!--";
+        commentSuffix = "-->";
         break;
-
-      // CSS-style comments (/* */)
+      case "python":
+      case "ruby":
+      case "perl":
+      case "yaml":
+      case "dockerfile":
+      case "shellscript":
+      case "makefile":
+        // No standard block comments, fallback to line
+        commentPrefix = "#";
+        break;
+      case "lua":
+        commentPrefix = "--[[";
+        commentSuffix = "]]";
+        break;
+    }
+  } else {
+    // Line comments
+    switch (languageId) {
+      case "python":
+      case "ruby":
+      case "perl":
+      case "yaml":
+      case "dockerfile":
+      case "shellscript":
+      case "makefile":
+        commentPrefix = "#";
+        break;
+      case "html":
+      case "xml":
+      case "markdown":
+        commentPrefix = "<!--";
+        commentSuffix = "-->";
+        break;
       case "css":
       case "less":
-      case "sass":
       case "scss":
-        commentPrefix = "/* ";
-        commentSuffix = " */";
+        commentPrefix = "/*";
+        commentSuffix = "*/";
         break;
-
-      // Percent-style comments (%)
-      case "latex":
-      case "erlang":
-      case "matlab":
-        commentPrefix = "%";
-        break;
-
-      // Dash-style comments (--)
-      case "sql":
       case "lua":
       case "haskell":
       case "ada":
@@ -80,26 +109,18 @@ function createCommentMarker(audioFileName, audioDuration, editor) {
       case "applescript":
         commentPrefix = "--";
         break;
-
-      // Semicolon-style comments (;)
       case "clojure":
       case "lisp":
       case "scheme":
       case "ini":
         commentPrefix = ";";
         break;
-
-      // Bat-style
       case "bat":
         commentPrefix = "REM ";
         break;
-
-      // VB-style (')
       case "vb":
         commentPrefix = "'";
         break;
-
-      // Vimscript (")
       case "vim":
       case "vimscript":
         commentPrefix = '"';
@@ -109,15 +130,26 @@ function createCommentMarker(audioFileName, audioDuration, editor) {
 
   const commentPrefixLine = commentPrefix.trim();
 
-  // Clean single-line marker
-  // Format: // 🎙️ Voice Note (00:05) [filename.wav]
-  let marker = `${commentPrefixLine} 🎙️ Voice Note (${audioDuration}) [${audioFileName}]`;
+  // Format: // 🎙️ Voice Note (00:05) [id:xyz]
+  let marker = `${commentPrefixLine} 🎙️ Voice Note (${audioDuration}) [id:${audioFileName}]`;
+
+  if (author) {
+    marker += ` by ${author}`;
+  }
 
   if (commentSuffix) {
     marker += ` ${commentSuffix}`;
   }
 
   marker += "\n";
+
+  if (textComment) {
+    marker += `${commentPrefixLine} ${textComment}`;
+    if (commentSuffix) {
+      marker += ` ${commentSuffix}`;
+    }
+    marker += "\n";
+  }
 
   return marker;
 }
@@ -146,8 +178,8 @@ class VoiceNoteCodeLensProvider {
   async provideCodeLenses(document, token) {
     const codeLenses = [];
     const text = document.getText();
-    // Regex to find the metadata line: // 🎙️ Voice Note (00:05) [filename.wav]
-    const regex = /🎙️ Voice Note \(([^)]+)\) \[([^\]]+)\]/g;
+    // Regex to find the metadata line: // 🎙️ Voice Note (00:05) [id:xyz] or [filename]
+    const regex = /🎙️ Voice Note \(([^)]+)\) \[(?:id:)?([^\]]+)\]/g;
 
     let match;
     while ((match = regex.exec(text)) !== null) {
@@ -171,18 +203,32 @@ class VoiceNoteCodeLensProvider {
 
       // Check if audio file exists
       let audioExists = false;
-      const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-      if (folder) {
-        const fileUri = vscode.Uri.joinPath(
-          folder.uri,
-          ".voicenotes",
-          fileName
-        );
-        try {
-          await vscode.workspace.fs.stat(fileUri);
-          audioExists = true;
-        } catch {
-          audioExists = false;
+
+      // Check if it's a URL (Legacy)
+      if (fileName.startsWith("http")) {
+        audioExists = true;
+      }
+      // Check if it's a Metadata ID (New)
+      else if (!fileName.endsWith(".wav")) {
+        // We can't easily check async in provideCodeLenses without slowing it down,
+        // so we assume it exists if it looks like an ID.
+        audioExists = true;
+      }
+      // Check Local File (Legacy)
+      else {
+        const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+        if (folder) {
+          const fileUri = vscode.Uri.joinPath(
+            folder.uri,
+            ".voicenotes",
+            fileName
+          );
+          try {
+            await vscode.workspace.fs.stat(fileUri);
+            audioExists = true;
+          } catch {
+            audioExists = false;
+          }
         }
       }
 
@@ -275,7 +321,25 @@ function activate(context) {
   const player = new AudioPlayer(context.extensionPath);
   globalPlayer = player;
 
+  const cloudinaryService = new CloudinaryService();
+  const voiceNoteManager = new VoiceNoteManager();
+
   safeExecute(() => player.initialize(), "Failed to initialize audio player");
+  safeExecute(
+    () => recorder.initialize(),
+    "Failed to initialize audio recorder"
+  );
+
+  // Listen for playback finish
+  player.on("finish", () => {
+    if (currentPlayingFileName) {
+      codeLensProvider.updateState(currentPlayingFileName, "stopped");
+    }
+    playbackStatusBarItem.hide();
+    stopStatusBarItem.hide();
+    isPaused = false;
+    currentPlayingFileName = null;
+  });
 
   // --- Status Bar Items ---
   playbackStatusBarItem = vscode.window.createStatusBarItem(
@@ -328,14 +392,28 @@ function activate(context) {
         return;
       }
 
-      // Initialize recorder process if needed
-      try {
-        await recorder.initialize();
-      } catch (err) {
-        vscode.window.showErrorMessage(
-          "Failed to initialize audio recorder: " + err.message
-        );
-        return;
+      // Check for Author
+      const config = vscode.workspace.getConfiguration("voicenote");
+      let author = config.get("author");
+      if (!author) {
+        author = await vscode.window.showInputBox({
+          placeHolder: "Enter your name (e.g., @JohnDoe)",
+          prompt: "Please set your author name for voice notes.",
+          ignoreFocusOut: true,
+        });
+        if (author) {
+          await config.update(
+            "author",
+            author,
+            vscode.ConfigurationTarget.Global
+          );
+        } else {
+          // User cancelled, maybe warn or proceed without author?
+          // Let's proceed but warn
+          vscode.window.showWarningMessage(
+            "Voice note will be created without an author."
+          );
+        }
       }
 
       // Create and show the Webview panel for recording
@@ -371,8 +449,9 @@ function activate(context) {
               break;
 
             case "stopRecording":
-              // Message: { command: 'stopRecording', duration: '0:05' }
+              // Message: { command: 'stopRecording', duration: '0:05', textComment: '...' }
               const duration = message.duration;
+              const textComment = message.textComment;
 
               // --- File Saving Logic ---
               const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -409,11 +488,68 @@ function activate(context) {
               try {
                 await recorder.stop(fsPath);
 
+                // --- Storage Logic ---
+                const config = vscode.workspace.getConfiguration("voicenote");
+                const storageMethod = config.get("storageMethod");
+                const author = config.get("author");
+                let noteId = crypto.randomBytes(4).toString("hex"); // Generate short ID
+                let storageUrl = "";
+                let originalName = audioFileName;
+
+                if (storageMethod === "cloudinary") {
+                  if (cloudinaryService.isConfigured()) {
+                    try {
+                      vscode.window.showInformationMessage(
+                        "Uploading voice note to Cloudinary..."
+                      );
+                      const url = await cloudinaryService.uploadFile(fsPath);
+                      storageUrl = url;
+
+                      // Delete local file after successful upload
+                      try {
+                        await vscode.workspace.fs.delete(fileUri);
+                      } catch (e) {
+                        console.warn(
+                          "Failed to delete local file after upload",
+                          e
+                        );
+                      }
+                    } catch (uploadError) {
+                      vscode.window.showErrorMessage(
+                        "Upload failed, saving locally instead: " +
+                          uploadError.message
+                      );
+                      // Fallback: Keep local file
+                      storageUrl = audioFileName;
+                    }
+                  } else {
+                    // Not configured, fallback to local
+                    vscode.window.showWarningMessage(
+                      "Cloudinary not configured. Saved locally."
+                    );
+                    storageUrl = audioFileName;
+                  }
+                } else {
+                  // Local
+                  storageUrl = audioFileName;
+                }
+
+                // Save Metadata
+                await voiceNoteManager.addNote(noteId, {
+                  url: storageUrl,
+                  duration: duration,
+                  originalName: originalName,
+                  author: author,
+                  textComment: textComment,
+                });
+
                 // --- Insert Comment into Code ---
                 const marker = createCommentMarker(
-                  audioFileName,
+                  noteId,
                   duration,
-                  editor
+                  editor,
+                  author,
+                  textComment
                 );
 
                 // Determine insertion position:
@@ -479,34 +615,128 @@ function activate(context) {
   // --- 2. Register the Playback Command ---
   let playbackDisposable = vscode.commands.registerCommand(
     "voicenote.playback",
-    async (fileName) => {
-      const workspaceFolders = vscode.workspace.workspaceFolders;
-      if (!workspaceFolders) return;
+    async (fileNameOrId) => {
+      let playPath = "";
+      let targetSource = fileNameOrId;
 
-      const workspaceRoot = workspaceFolders[0].uri;
-      const fileUri = vscode.Uri.joinPath(
-        workspaceRoot,
-        ".voicenotes",
-        fileName
-      );
+      // Resolve ID if needed
+      if (!fileNameOrId.startsWith("http") && !fileNameOrId.endsWith(".wav")) {
+        const note = await voiceNoteManager.getNote(fileNameOrId);
+        if (note) {
+          targetSource = note.url;
+        } else {
+          vscode.window.showErrorMessage(
+            `Voice note ID not found: ${fileNameOrId}`
+          );
+          return;
+        }
+      }
 
-      // Check if file exists
-      try {
-        await vscode.workspace.fs.stat(fileUri);
-      } catch (e) {
-        vscode.window.showErrorMessage(`Audio file not found: ${fileName}`);
-        return;
+      if (targetSource.startsWith("http")) {
+        // Handle URL
+        const config = vscode.workspace.getConfiguration("voicenote");
+        const useCache = config.get("cacheOnlineAudio");
+
+        let cachePath = null;
+        if (useCache) {
+          const workspaceFolders = vscode.workspace.workspaceFolders;
+          if (workspaceFolders) {
+            const workspaceRoot = workspaceFolders[0].uri;
+            const cacheDir = vscode.Uri.joinPath(
+              workspaceRoot,
+              ".voicenotes",
+              "cache"
+            );
+            // Create cache dir if needed
+            try {
+              await vscode.workspace.fs.createDirectory(cacheDir);
+            } catch (e) {}
+
+            // Hash the URL to get a safe filename
+            const hash = crypto
+              .createHash("md5")
+              .update(targetSource)
+              .digest("hex");
+            cachePath = vscode.Uri.joinPath(cacheDir, `${hash}.wav`).fsPath;
+
+            // Check if exists
+            if (fs.existsSync(cachePath)) {
+              console.log("Using cached audio:", cachePath);
+              playPath = cachePath;
+            }
+          }
+        }
+
+        if (!playPath) {
+          // Download to temp or cache
+          const targetPath =
+            cachePath || path.join(os.tmpdir(), `voicenote_${Date.now()}.wav`);
+
+          try {
+            if (!cachePath)
+              vscode.window.showInformationMessage("Downloading voice note...");
+            const https = require("https");
+            const file = fs.createWriteStream(targetPath);
+
+            await new Promise((resolve, reject) => {
+              https
+                .get(targetSource, function (response) {
+                  if (response.statusCode !== 200) {
+                    reject(new Error(`Status Code: ${response.statusCode}`));
+                    return;
+                  }
+                  response.pipe(file);
+                  file.on("finish", function () {
+                    file.close(resolve);
+                  });
+                })
+                .on("error", function (err) {
+                  fs.unlink(targetPath, () => {});
+                  reject(err);
+                });
+            });
+
+            playPath = targetPath;
+          } catch (err) {
+            vscode.window.showErrorMessage(
+              "Failed to download audio: " + err.message
+            );
+            return;
+          }
+        }
+      } else {
+        // Handle Local File
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders) return;
+
+        const workspaceRoot = workspaceFolders[0].uri;
+        const fileUri = vscode.Uri.joinPath(
+          workspaceRoot,
+          ".voicenotes",
+          targetSource
+        );
+
+        // Check if file exists
+        try {
+          await vscode.workspace.fs.stat(fileUri);
+          playPath = fileUri.fsPath;
+        } catch (e) {
+          vscode.window.showErrorMessage(
+            `Audio file not found: ${targetSource}`
+          );
+          return;
+        }
       }
 
       // Use native player
       try {
         await player.initialize(); // Ensure ready
-        player.play(fileUri.fsPath);
+        player.play(playPath);
 
         // Update State
-        currentPlayingFileName = fileName;
+        currentPlayingFileName = fileNameOrId;
         isPaused = false;
-        codeLensProvider.updateState(fileName, "playing");
+        codeLensProvider.updateState(fileNameOrId, "playing");
 
         // Show status bar
         playbackStatusBarItem.text = `$(debug-pause) Pause`;
@@ -590,20 +820,36 @@ function activate(context) {
         if (confirm !== "Delete") return;
 
         try {
-          // 1. Delete the audio file
-          const workspaceFolders = vscode.workspace.workspaceFolders;
-          if (workspaceFolders) {
-            const workspaceRoot = workspaceFolders[0].uri;
-            const audioFileUri = vscode.Uri.joinPath(
-              workspaceRoot,
-              ".voicenotes",
-              /** @type {string} */ (fileName)
-            );
-            try {
-              await vscode.workspace.fs.delete(audioFileUri);
-            } catch (e) {
-              console.warn("Audio file not found or already deleted");
+          // 1. Delete the audio file (if local)
+          // Resolve ID first
+          let targetSource = fileName;
+          let note = null;
+          if (!fileName.startsWith("http") && !fileName.endsWith(".wav")) {
+            note = await voiceNoteManager.getNote(fileName);
+            if (note) {
+              targetSource = note.url;
+              // Also delete metadata
+              await voiceNoteManager.deleteNote(fileName);
             }
+          }
+
+          if (targetSource && !targetSource.startsWith("http")) {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders) {
+              const workspaceRoot = workspaceFolders[0].uri;
+              const audioFileUri = vscode.Uri.joinPath(
+                workspaceRoot,
+                ".voicenotes",
+                /** @type {string} */ (targetSource)
+              );
+              try {
+                await vscode.workspace.fs.delete(audioFileUri);
+              } catch (e) {
+                console.warn("Audio file not found or already deleted");
+              }
+            }
+          } else {
+            console.log("Skipping local file deletion for remote URL");
           }
 
           // 2. Remove the comment from the file
@@ -617,7 +863,8 @@ function activate(context) {
             /[.*+?^${}()|[\]\\]/g,
             "\\$&"
           );
-          const regex = new RegExp(`\\[${escapedFileName}\\]`);
+          // Match [id:xyz] or [filename]
+          const regex = new RegExp(`\\[(?:id:)?${escapedFileName}\\]`);
 
           let lineToDelete = -1;
           for (let i = 0; i < lines.length; i++) {
@@ -632,6 +879,19 @@ function activate(context) {
               const range =
                 document.lineAt(lineToDelete).rangeIncludingLineBreak;
               editBuilder.delete(range);
+
+              // Check for optional comment on next line
+              if (note && note.textComment && note.textComment.trim()) {
+                const nextLineIndex = lineToDelete + 1;
+                if (nextLineIndex < document.lineCount) {
+                  const nextLine = document.lineAt(nextLineIndex).text;
+                  if (nextLine.includes(note.textComment)) {
+                    const range2 =
+                      document.lineAt(nextLineIndex).rangeIncludingLineBreak;
+                    editBuilder.delete(range2);
+                  }
+                }
+              }
             });
           }
 
@@ -667,7 +927,8 @@ function activate(context) {
             );
             const text = document.getText();
             const lines = text.split("\n");
-            const regex = /🎙️ Voice Note \(([^)]+)\) \[([^\]]+)\]/;
+            // Regex: // 🎙️ Voice Note (00:05) [filename.wav] or [id:xyz]
+            const regex = /🎙️ Voice Note \(([^)]+)\) \[(?:id:)?([^\]]+)\]/;
 
             const edit = new vscode.WorkspaceEdit();
             let hasEdits = false;
@@ -717,6 +978,92 @@ function activate(context) {
       }
     })
   );
+
+  // --- 6. Switch Storage Command ---
+  context.subscriptions.push(
+    vscode.commands.registerCommand("voicenote.switchStorage", async () => {
+      const config = vscode.workspace.getConfiguration("voicenote");
+      const current = config.get("storageMethod");
+
+      const items = [
+        {
+          label: "Local",
+          description: "Save audio files in .voicenotes folder",
+          picked: current === "local",
+        },
+        {
+          label: "Cloudinary",
+          description: "Upload to Cloudinary (requires config)",
+          picked: current === "cloudinary",
+        },
+      ];
+
+      const selection = await vscode.window.showQuickPick(items, {
+        placeHolder: "Select where to store voice notes",
+      });
+
+      if (selection) {
+        const newValue = selection.label.toLowerCase();
+        await config.update(
+          "storageMethod",
+          newValue,
+          vscode.ConfigurationTarget.Global
+        );
+
+        // Refresh the tree view immediately
+        voiceNoteProvider.refresh();
+
+        vscode.window.showInformationMessage(
+          `Voice Note storage set to: ${selection.label}`
+        );
+
+        // If Cloudinary selected but not configured, prompt
+        if (newValue === "cloudinary" && !cloudinaryService.isConfigured()) {
+          vscode.commands.executeCommand("voicenote.configureCloudinary");
+        }
+      }
+    })
+  );
+
+  // --- 7. Configure Cloudinary Command ---
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "voicenote.configureCloudinary",
+      async () => {
+        vscode.commands.executeCommand(
+          "workbench.action.openSettings",
+          "voicenote.cloudinary"
+        );
+      }
+    )
+  );
+
+  // --- 8. Set Author Command ---
+  context.subscriptions.push(
+    vscode.commands.registerCommand("voicenote.setAuthor", async () => {
+      const config = vscode.workspace.getConfiguration("voicenote");
+      const currentAuthor = config.get("author") || "";
+
+      const newAuthor = await vscode.window.showInputBox({
+        placeHolder: "Enter your name (e.g., @JohnDoe)",
+        prompt: "Set your author name for voice notes.",
+        value: currentAuthor,
+        ignoreFocusOut: true,
+      });
+
+      if (newAuthor !== undefined) {
+        // Allow empty string to clear it if they want
+        await config.update(
+          "author",
+          newAuthor,
+          vscode.ConfigurationTarget.Global
+        );
+        vscode.window.showInformationMessage(
+          `Voice Note Author set to: ${newAuthor}`
+        );
+      }
+    })
+  );
 }
 
 // This utility function generates the Webview HTML content.
@@ -743,6 +1090,9 @@ function getWebviewContent(webview, extensionUri) {
             <div class="container">
                 <div id="status">Ready to Record</div>
                 <div id="timer">00:00</div>
+                <div class="input-group">
+                    <input type="text" id="commentInput" placeholder="Optional text comment..." />
+                </div>
                 <div class="controls">
                     <button id="recordButton">🎙️ Record</button>
                     <button id="stopButton" disabled>🛑 Stop & Insert</button>
@@ -754,7 +1104,6 @@ function getWebviewContent(webview, extensionUri) {
         </html>
     `;
 }
-
 module.exports = {
   activate,
   deactivate: () => {

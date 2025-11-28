@@ -73,3 +73,25 @@ button {
     opacity: 0.7;
   }
 }
+
+/* New Input Styles */
+.input-group {
+    margin: 15px 0;
+    width: 100%;
+}
+
+#commentInput {
+    width: 100%;
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px solid var(--vscode-input-border);
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+#commentInput:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+    border-color: var(--vscode-focusBorder);
+}
