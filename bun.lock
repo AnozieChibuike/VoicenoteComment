@@ -1,0 +1,14 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "voicenote-comment",
+      "devDependencies": {
+        "@types/vscode": "^1.84.0",
+      },
+    },
+  },
+  "packages": {
+    "@types/vscode": ["@types/vscode@1.106.1", "", {}, "sha512-R/HV8u2h8CAddSbX8cjpdd7B8/GnE4UjgjpuGuHcbp1xV6yh4OeqU4L1pKjlwujCrSFS0MOpwJAIs/NexMB1fQ=="],
+  }
+}

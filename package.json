@@ -1,0 +1,107 @@
+{
+  "name": "voicenote-comment",
+  "displayName": "Voice Note Comment",
+  "description": "Add sharable voice notes directly to your code as comments.",
+  "version": "0.0.1",
+  "publisher": "AnozieChibuike",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AnozieChibuike/VoicenoteComment.git"
+  },
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "voicenote.startRecording",
+        "title": "VoiceNote: Start Recording Comment"
+      },
+      {
+        "command": "voicenote.playback",
+        "title": "VoiceNote: Play Comment (Internal)"
+      },
+      {
+        "command": "voicenote.deleteNote",
+        "title": "Delete Voice Note",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "voicenote.deleteAllNotes",
+        "title": "Delete All Voice Notes",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "voicenote.refreshList",
+        "title": "Refresh Voice Notes",
+        "icon": "$(refresh)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "voicenote.startRecording",
+        "key": "alt+v",
+        "mac": "alt+v",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "voicenote.startRecording",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "voicenote.deleteNote",
+          "when": "view == voicenoteList && viewItem == note",
+          "group": "inline"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "voicenote.refreshList",
+          "when": "view == voicenoteList",
+          "group": "navigation"
+        },
+        {
+          "command": "voicenote.deleteAllNotes",
+          "when": "view == voicenoteList",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "voicenote-explorer",
+          "title": "Voice Notes",
+          "icon": "$(mic)"
+        }
+      ]
+    },
+    "views": {
+      "voicenote-explorer": [
+        {
+          "id": "voicenoteList",
+          "name": "All Voice Notes"
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.84.0"
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "echo 'No compilation needed for pure JS'",
+    "watch": "echo 'No watch script needed for pure JS'"
+  }
+}
