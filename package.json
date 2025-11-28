@@ -2,7 +2,8 @@
   "name": "voicenote-comment",
   "displayName": "Voice Note Comment",
   "description": "Add sharable voice notes directly to your code as comments.",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "icon": "images/icon.png",
   "publisher": "AnozieChibuike",
   "repository": {
     "type": "git",

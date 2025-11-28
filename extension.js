@@ -143,7 +143,7 @@ class VoiceNoteCodeLensProvider {
     this.refresh();
   }
 
-  provideCodeLenses(document, token) {
+  async provideCodeLenses(document, token) {
     const codeLenses = [];
     const text = document.getText();
     // Regex to find the metadata line: // 🎙️ Voice Note (00:05) [filename.wav]
@@ -169,50 +169,79 @@ class VoiceNoteCodeLensProvider {
         arguments: [fileName, document.uri],
       };
 
-      if (state === "playing") {
-        // Show Pause and Stop
-        codeLenses.push(
-          new vscode.CodeLens(range, {
-            title: `$(debug-pause) Pause`,
-            tooltip: "Click to pause audio",
-            command: "voicenote.togglePause",
-            arguments: [],
-          })
+      // Check if audio file exists
+      let audioExists = false;
+      const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+      if (folder) {
+        const fileUri = vscode.Uri.joinPath(
+          folder.uri,
+          ".voicenotes",
+          fileName
         );
-        codeLenses.push(
-          new vscode.CodeLens(range, {
-            title: `$(debug-stop) Stop`,
-            tooltip: "Click to stop audio",
-            command: "voicenote.stopPlayback",
-            arguments: [],
-          })
-        );
-      } else if (state === "paused") {
-        // Show Play (Resume) and Stop
-        codeLenses.push(
-          new vscode.CodeLens(range, {
-            title: `$(play) Play`,
-            tooltip: "Click to resume audio",
-            command: "voicenote.togglePause",
-            arguments: [],
-          })
-        );
-        codeLenses.push(
-          new vscode.CodeLens(range, {
-            title: `$(debug-stop) Stop`,
-            tooltip: "Click to stop audio",
-            command: "voicenote.stopPlayback",
-            arguments: [],
-          })
-        );
+        try {
+          await vscode.workspace.fs.stat(fileUri);
+          audioExists = true;
+        } catch {
+          audioExists = false;
+        }
+      }
+
+      if (audioExists) {
+        if (state === "playing") {
+          // Show Pause and Stop
+          codeLenses.push(
+            new vscode.CodeLens(range, {
+              title: `$(debug-pause) Pause`,
+              tooltip: "Click to pause audio",
+              command: "voicenote.togglePause",
+              arguments: [],
+            })
+          );
+          codeLenses.push(
+            new vscode.CodeLens(range, {
+              title: `$(debug-stop) Stop`,
+              tooltip: "Click to stop audio",
+              command: "voicenote.stopPlayback",
+              arguments: [],
+            })
+          );
+        } else if (state === "paused") {
+          // Show Play (Resume) and Stop
+          codeLenses.push(
+            new vscode.CodeLens(range, {
+              title: `$(play) Play`,
+              tooltip: "Click to resume audio",
+              command: "voicenote.togglePause",
+              arguments: [],
+            })
+          );
+          codeLenses.push(
+            new vscode.CodeLens(range, {
+              title: `$(debug-stop) Stop`,
+              tooltip: "Click to stop audio",
+              command: "voicenote.stopPlayback",
+              arguments: [],
+            })
+          );
+        } else {
+          // Stopped: Show Play
+          codeLenses.push(
+            new vscode.CodeLens(range, {
+              title: `$(play) Play`,
+              tooltip: "Click to play audio",
+              command: "voicenote.playback",
+              arguments: [fileName],
+            })
+          );
+        }
       } else {
-        // Stopped: Show Play
+        // Audio missing: Show warning or just Delete
         codeLenses.push(
           new vscode.CodeLens(range, {
-            title: `$(play) Play`,
-            tooltip: "Click to play audio",
-            command: "voicenote.playback",
-            arguments: [fileName],
+            title: `$(warning) Audio Missing`,
+            tooltip: "Audio file not found",
+            command: "",
+            arguments: [],
           })
         );
       }
